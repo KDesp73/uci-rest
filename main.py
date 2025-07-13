@@ -7,6 +7,7 @@ from typing import Optional, Tuple, List
 
 app = FastAPI()
 
+
 class MoveRequest(BaseModel):
     engine: str
     position: str
@@ -15,8 +16,11 @@ class MoveRequest(BaseModel):
 
 ENGINE_BINARIES = {
     "stockfish": "engines/stockfish",
-    "0.3.0": "engines/engine-0.3.0"
+    "0.3.0": "engines/engine-0.3.0",
+    "0.2.1": "engines/engine-0.2.1",
+    "0.2.0": "engines/engine-0.2.0",
 }
+
 
 def parse_uci_move(move: str) -> Tuple[str, str, Optional[str]]:
     """
@@ -32,39 +36,39 @@ def parse_uci_move(move: str) -> Tuple[str, str, Optional[str]]:
     return from_sq, to_sq, promotion
 
 
-async def get_best_move(engine_path: str, fen: str, depth: int) -> Tuple[str, List[str]]:
+async def get_best_move(engine_path: str, fen: str, depth: int, timeout_seconds: int = 10) -> Tuple[str, List[str]]:
     log_lines = []
 
-    try:
-        process = await asyncio.create_subprocess_exec(
-            engine_path,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
-        )
+    process = await asyncio.create_subprocess_exec(
+        engine_path,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE
+    )
 
-        async def send(cmd: str):
-            log_lines.append(f">>> {cmd}")
-            process.stdin.write(f"{cmd}\n".encode())
-            await process.stdin.drain()
+    async def send(cmd: str):
+        log_lines.append(f">>> {cmd}")
+        process.stdin.write(f"{cmd}\n".encode())
+        await process.stdin.drain()
 
-        async def readline():
-            raw = await process.stdout.readline()
+    async def readline():
+        raw = await process.stdout.readline()
+        line = raw.decode('utf-8', errors='ignore').strip()
+        if line:
+            log_lines.append(f"<<< {line}")
+        return line
+
+    async def read_stderr():
+        while True:
+            raw = await process.stderr.readline()
+            if not raw:
+                break
             line = raw.decode('utf-8', errors='ignore').strip()
-            if line:
-                log_lines.append(f"<<< {line}")
-            return line
+            log_lines.append(f"!!! {line}")
 
-        async def read_stderr():
-            while True:
-                raw = await process.stderr.readline()
-                if not raw:
-                    break
-                line = raw.decode('utf-8', errors='ignore').strip()
-                log_lines.append(f"!!! {line}")
+    stderr_task = asyncio.create_task(read_stderr())
 
-        stderr_task = asyncio.create_task(read_stderr())
-
+    try:
         await send("uci")
         while True:
             line = await readline()
@@ -97,6 +101,11 @@ async def get_best_move(engine_path: str, fen: str, depth: int) -> Tuple[str, Li
         raise RuntimeError("Engine did not return a move.")
 
     except Exception as e:
+        try:
+            process.kill()
+        except Exception:
+            pass
+        await process.wait()
         log_lines.append(f"!!! Exception: {str(e)}")
         raise RuntimeError("\n".join(log_lines))
 

@@ -1,0 +1,12 @@
+services:
+  uci-rest:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+      - ./engines:/app/engines
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+
