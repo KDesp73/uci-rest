@@ -5,12 +5,10 @@ import os
 import asyncio
 from typing import Optional, Tuple, List
 
-
 app = FastAPI()
 
-
 class MoveRequest(BaseModel):
-    version: str
+    engine: str
     position: str
     depth: Optional[int] = 15
 
@@ -19,7 +17,6 @@ ENGINE_BINARIES = {
     "stockfish": "engines/stockfish",
     "0.3.0": "engines/engine-0.3.0"
 }
-
 
 def parse_uci_move(move: str) -> Tuple[str, str, Optional[str]]:
     """
@@ -52,17 +49,19 @@ async def get_best_move(engine_path: str, fen: str, depth: int) -> Tuple[str, Li
             await process.stdin.drain()
 
         async def readline():
-            line = (await process.stdout.readline()).decode().strip()
+            raw = await process.stdout.readline()
+            line = raw.decode('utf-8', errors='ignore').strip()
             if line:
                 log_lines.append(f"<<< {line}")
             return line
 
         async def read_stderr():
             while True:
-                line = await process.stderr.readline()
-                if not line:
+                raw = await process.stderr.readline()
+                if not raw:
                     break
-                log_lines.append(f"!!! {line.decode().strip()}")
+                line = raw.decode('utf-8', errors='ignore').strip()
+                log_lines.append(f"!!! {line}")
 
         stderr_task = asyncio.create_task(read_stderr())
 
@@ -104,9 +103,9 @@ async def get_best_move(engine_path: str, fen: str, depth: int) -> Tuple[str, Li
 
 @app.post("/bestmove")
 async def bestmove(request: MoveRequest):
-    engine_path = ENGINE_BINARIES.get(request.version)
+    engine_path = ENGINE_BINARIES.get(request.engine)
     if not engine_path or not os.path.isfile(engine_path):
-        raise HTTPException(status_code=404, detail="Engine version not found")
+        raise HTTPException(status_code=404, detail="Engine not found")
 
     try:
         best_move, logs = await get_best_move(engine_path, request.position, request.depth)
